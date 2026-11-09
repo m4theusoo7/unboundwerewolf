@@ -1,0 +1,213 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+
+local player = Players.LocalPlayer
+local tweenSpeed = 300 -- Velocidade segura
+
+-- Inicia desligado
+getgenv().FarmWerewolfAtivo = false
+
+-- Nome do alvo (pesquisa em minúsculas para não dar erro)
+local nomeDoBoss = "unbound werewolf"
+
+---------------------------------------------------------
+-- SISTEMA DE INTERFACE FLUTUANTE (BOTÃO REDONDO)
+---------------------------------------------------------
+local uiName = "BotaoFarmWerewolf"
+if CoreGui:FindFirstChild(uiName) then
+    CoreGui[uiName]:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = uiName
+screenGui.Parent = CoreGui
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 55, 0, 55)
+toggleBtn.Position = UDim2.new(0.5, 35, 0.2, 0) -- Coloquei um pouco mais para a direita para não sobrepor outros botões
+toggleBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50) -- Vermelho (OFF)
+toggleBtn.Text = "OFF"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Font = Enum.Font.FredokaOne
+toggleBtn.TextSize = 20
+toggleBtn.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(1, 0)
+corner.Parent = toggleBtn
+
+local stroke = Instance.new("UIStroke")
+stroke.Thickness = 3
+stroke.Color = Color3.fromRGB(255, 255, 255)
+stroke.Parent = toggleBtn
+
+-- Sistema de Arrastar o Botão
+local dragging, dragInput, dragStart, startPos
+
+local function update(input)
+    local delta = input.Position - dragStart
+    toggleBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+toggleBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = toggleBtn.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+toggleBtn.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+
+---------------------------------------------------------
+-- SISTEMA DE FÍSICA E FARM
+---------------------------------------------------------
+local noclipConnection
+local function setupPhysics()
+    if noclipConnection then noclipConnection:Disconnect() end
+    noclipConnection = RunService.Stepped:Connect(function()
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            local hrp = char.HumanoidRootPart
+            
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+            
+            local bv = hrp:FindFirstChild("AntiBorracha")
+            if not bv then
+                bv = Instance.new("BodyVelocity")
+                bv.Name = "AntiBorracha"
+                bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                bv.Velocity = Vector3.new(0, 0, 0)
+                bv.Parent = hrp
+            end
+            
+            hrp.Velocity = Vector3.new(0, 0, 0)
+        end
+    end)
+end
+
+local function removePhysics()
+    if noclipConnection then noclipConnection:Disconnect() end
+    local char = player.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        local bv = char.HumanoidRootPart:FindFirstChild("AntiBorracha")
+        if bv then bv:Destroy() end
+    end
+end
+
+local function tweenPara(targetCFrame)
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = char.HumanoidRootPart
+
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
+    local timeToTravel = distance / tweenSpeed
+    
+    local tweenInfo = TweenInfo.new(timeToTravel, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+    
+    tween:Play()
+    return tween
+end
+
+local function getBoss()
+    if not Workspace:FindFirstChild("Enemies") then return nil end
+    
+    for _, enemy in pairs(Workspace.Enemies:GetChildren()) do
+        if string.find(string.lower(enemy.Name), string.lower(nomeDoBoss)) then
+            if enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 and enemy:FindFirstChild("HumanoidRootPart") then
+                return enemy
+            end
+        end
+    end
+    return nil
+end
+
+local function usarAtaques()
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+    
+    local skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+    for _, key in ipairs(skills) do
+        VirtualInputManager:SendKeyEvent(true, key, false, game)
+        VirtualInputManager:SendKeyEvent(false, key, false, game)
+    end
+end
+
+local function iniciarFarmBoss()
+    setupPhysics()
+
+    while getgenv().FarmWerewolfAtivo do
+        local char = player.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") then
+            task.wait(1)
+            continue
+        end
+        local hrp = char.HumanoidRootPart
+
+        local boss = getBoss()
+        
+        if boss then
+            local bossHrp = boss.HumanoidRootPart
+            local dist = (hrp.Position - bossHrp.Position).Magnitude
+            
+            if dist > 15 then
+                -- Vai até o werewolf e fica 10 studs acima (evita tomar combos corpo a corpo)
+                local tween = tweenPara(bossHrp.CFrame * CFrame.new(0, 10, 0)) 
+                tween.Completed:Wait()
+            else
+                -- Trava a mira nele e ataca
+                hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(bossHrp.Position.X, hrp.Position.Y, bossHrp.Position.Z))
+                usarAtaques()
+            end
+        end
+        
+        task.wait(0.1)
+    end
+    
+    removePhysics()
+end
+
+---------------------------------------------------------
+-- CONTROLE DE ATIVAÇÃO DO BOTÃO
+---------------------------------------------------------
+toggleBtn.MouseButton1Click:Connect(function()
+    getgenv().FarmWerewolfAtivo = not getgenv().FarmWerewolfAtivo
+    
+    if getgenv().FarmWerewolfAtivo then
+        -- Liga o Farm
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(50, 255, 50) -- Verde
+        toggleBtn.Text = "ON"
+        task.spawn(iniciarFarmBoss)
+    else
+        -- Desliga o Farm
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50) -- Vermelho
+        toggleBtn.Text = "OFF"
+        removePhysics() -- Devolve a física normal na hora
+    end
+end)
